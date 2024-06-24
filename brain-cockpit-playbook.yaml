@@ -1,0 +1,214 @@
+- name: Setup brain-cockpit instance
+  # hosts: tgcc
+  hosts: ebrains
+  environment:
+    DEB_PYTHON_INSTALL_LAYOUT: deb_system
+    TMPDIR: "{{ path_work }}/cache"
+  tasks: 
+
+    - name: System installs
+      tags: system
+      block:
+
+      - name: Update letsencrypt
+        become: yes
+        apt:
+          name: letsencrypt
+          state: latest
+
+      - name: Update unzip
+        become: yes
+        apt:
+          name: unzip
+          state: latest
+
+      - name: Update nginx
+        become: yes
+        apt:
+          name: nginx
+          state: latest
+
+      - name: Update pip
+        become: yes
+        apt:
+          name: python3-pip
+          state: latest
+      
+      - name: Start nginx
+        become: yes
+        service: 
+          name: nginx
+          state: started
+          enabled: yes
+      
+      - name: Add nodejs apt key
+        become: yes
+        apt_key:
+          url: https://deb.nodesource.com/gpgkey/nodesource.gpg.key
+          state: present
+
+      - name: Add nodejs 20.x ppa for apt repo
+        become: yes
+        apt_repository:
+          repo: deb https://deb.nodesource.com/node_20.x jammy main
+          update_cache: yes
+
+      - name: Install nodejs
+        become: yes
+        apt:
+          update_cache: yes
+          name: nodejs
+          state: present
+
+    - name: Create work dir
+      become: yes
+      ansible.builtin.file:
+        path: "{{ path_work }}"
+        state: directory
+        mode: "0777"
+
+    - name: Create cache dir
+      become: yes
+      ansible.builtin.file:
+        path: "{{ path_work }}/cache"
+        state: directory
+        mode: "0777"
+
+    # # Download and unzip IBC dataset
+    # - name: IBC data
+    #   block:
+
+    #   # TODO: Download IBC data
+    #   # TODO: Download descriptions
+    #   - name: Unzip IBC dataset
+    #     ansible.builtin.unarchive:
+    #       # creates: "{{ path_work }}/mathlang_rsvp_fs5_fs7_individual_db"
+    #       src: "{{ path_work }}/tgcc_mathlang_rsvp.zip"
+    #       dest: "{{ path_work }}"
+    #       remote_src: yes
+
+    # Download, install, build and start brain-cockpit
+    - name: Install brain-cockpit
+      tags: bc
+      block:
+
+      - name: Clone brain-cockpit repo
+        git:
+          repo: https://github.com/alexisthual/brain-cockpit
+          dest: "{{ path_work }}/brain-cockpit"
+          clone: yes
+          force: yes
+          update: yes
+
+      - name: Setup brain-cockpit back-end config
+        ansible.builtin.template:
+          src: templates/bc_config.j2
+          dest: "{{ path_work }}/bc_config.yaml"
+      
+      - name: Pip install brain-cockpit back-end
+        become: yes
+        # ansible.builtin.command: python3 -m pip install --ignore-installed -e .
+        ansible.builtin.command: "python3 -m pip install --cache-dir={{ path_work }}/cache/ --force-reinstall -e ."
+        args:
+          chdir: "{{ path_work }}/brain-cockpit"
+
+      - name: Install front-end node packages
+        community.general.npm:
+          path: "{{ path_work }}/brain-cockpit/web"
+
+      - name: Setup brain-cockpit front-end config
+        tags: test
+        ansible.builtin.template:
+          src: templates/bc_front_config.j2
+          dest: "{{ path_work }}/brain-cockpit/web/.env.production"
+
+      - name: Build front-end
+        tags: test
+        ansible.builtin.command: npm run build
+        args:
+          chdir: "{{ path_work }}/brain-cockpit/web"
+      
+      - name: Move front-end
+        tags: test
+        become: yes
+        ansible.builtin.copy:
+          src: "{{ path_work }}/brain-cockpit/web/build/"
+          dest: "/var/www/html/brain-cockpit"
+          remote_src: yes
+
+    # Setup Let's encrypt certificate
+    - name: Let's encrypt certificate
+      tags: letsencrypt
+      block:
+
+      - name: Create letsencrypt dir
+        become: yes
+        ansible.builtin.file:
+          path: "{{ letsencrypt_dir }}"
+          state: directory
+          mode: "0777"
+      
+      - name: Restart nginx
+        become: yes
+        service: 
+          name: nginx
+          state: restarted
+      
+      - name: Create letsencrypt certificate
+        become: yes
+        shell: letsencrypt certonly -n --webroot -w {{ letsencrypt_dir }} -m {{ letsencrypt_email }} --agree-tos -d {{ domain_name }}
+        args:
+          creates: /etc/letsencrypt/live/{{ domain_name }}
+
+      - name: Add letsencrypt cronjob for cert renewal
+        ansible.builtin.cron:
+          name: letsencrypt_renewal
+          special_time: weekly
+          job: letsencrypt --renew certonly -n --webroot -w {{ letsencrypt_dir }} -m {{ letsencrypt_email }} --agree-tos -d {{ domain_name }} && service nginx reload
+      
+      - name: Generate dhparams
+        become: yes
+        shell: openssl dhparam -out /etc/nginx/dhparams.pem 2048
+        args:
+          creates: /etc/nginx/dhparams.pem
+
+    # Update and restart nginx
+    - name: Refresh nginx
+      block:
+
+      - name: Update nginx config
+        become: yes
+        ansible.builtin.template:
+          src: templates/nginx.j2
+          dest: "/etc/nginx/sites-available/default"
+
+      - name: Enable nginx config
+        become: yes
+        ansible.builtin.file:
+          src: "/etc/nginx/sites-available/default"
+          dest: "/etc/nginx/sites-enabled/default"
+          state: link
+
+      - name: Restart nginx
+        become: yes
+        service: 
+          name: nginx
+          state: restarted
+    
+    # Start backend
+    - name: Start backend
+      tags: backend
+      block:
+
+      - name: Update service file
+        become: yes
+        ansible.builtin.template:
+          src: templates/bc.service
+          dest: "/etc/systemd/system/bc.service"
+
+      - name: Check brain-cockpit backend is running
+        become: yes
+        systemd:
+          daemon_reload: yes
+          name: bc
+          state: restarted
