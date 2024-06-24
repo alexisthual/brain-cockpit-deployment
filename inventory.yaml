@@ -1,0 +1,26 @@
+tgcc:
+  hosts:
+    vm1:
+      ansible_host: 132.167.237.39 
+      ansible_user: ubuntu
+      ansible_ssh_private_key_file: ~/.ssh/id_rsa.pub
+  vars:
+    path_work: /home/ubuntu/work
+    api_url: 132.167.237.39/api
+    api_port: 8080
+
+ebrains:
+  hosts:
+    vm2:
+      ansible_host: brain-cockpit.jsccloud
+      ansible_user: alexis
+  vars:
+    ansible_ssh_common_args: "-o ProxyCommand='ssh -W %h:%p -i ~/.ssh/id_rsa.pub alexis@jh-1.tc.humanbrainproject.eu'"
+    path_work: /opt/work
+    api_url: "{{ domain_name }}/api"
+    api_port: 8080
+    api_threads: 14
+    # domain_name: brain-cockpit.tc.humanbrainproject.eu
+    domain_name: brain-cockpit.apps.ebrains.eu
+    letsencrypt_dir: /var/www/letsencrypt
+    letsencrypt_email: alexisthual@pm.me
