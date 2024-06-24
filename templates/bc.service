@@ -1,0 +1,14 @@
+[Unit]
+Description=Brain-cockpit backend
+After=multi-user.target
+After=network.target
+
+[Service]
+User=alexis
+Restart=always
+Type=simple
+WorkingDirectory={{ path_work }}/brain-cockpit
+ExecStart=/usr/bin/python3 /opt/work/brain-cockpit/api/main.py --env prod --port {{ api_port }} --threads {{ api_threads }} --config {{ path_work }}/bc_config.yaml
+
+[Install]
+WantedBy=multi-user.target

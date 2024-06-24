@@ -1,0 +1,17 @@
+allow_very_unsafe_file_sharing: false
+# Only set cache if dataset is small enough to be
+# deplicated on disk
+# cache_folder: {{ path_work }}/tmp/brain-cockpit
+cache_folder: null
+features:
+  datasets:
+    ibc:
+      name: Individual Brain Charting
+      path: {{ path_work }}/ibc_surf_all/result_db.csv
+      descriptions: {{ path_work }}/ibc_descriptions.json
+      unit: z-score
+      mesh_types:
+        default: pial
+        other:
+          - infl
+          - white
